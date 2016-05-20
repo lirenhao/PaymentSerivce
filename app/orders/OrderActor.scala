@@ -178,7 +178,7 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
   private def sendMessage(jsValue: JsValue, merTermId: String = state.merTermId, userId: String = state.userId.orNull): Unit = {
     if (merTermId != null || userId != null)
       clientBridge ! ClientSessionBridgeActor.MessageCmd(
-        merTermId, userId, OrderMessage(makePayResultJsValue)
+        merTermId, userId, OrderMessage(jsValue)
       )
   }
 
