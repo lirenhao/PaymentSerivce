@@ -1,6 +1,6 @@
 package orders
 
-import akka.actor.{ActorRef, Props, Status, Terminated}
+import akka.actor.{ActorRef, ActorSelection, Props, Status, Terminated}
 import akka.persistence.{PersistentActor, SaveSnapshotSuccess, SnapshotOffer}
 import orders.TerminalType._
 
@@ -51,7 +51,7 @@ object OrderManagerActor {
 
 }
 
-class OrderManagerActor(clientBridge: ActorRef) extends PersistentActor {
+class OrderManagerActor(clientBridgeSelection: ActorSelection, marketingSelection: ActorSelection) extends PersistentActor {
 
   import OrderManagerActor._
 
@@ -59,7 +59,7 @@ class OrderManagerActor(clientBridge: ActorRef) extends PersistentActor {
   private var state = OrderManagerState(Map.empty, Map.empty, Set[String](), 0)
   private val (getOrderRef, removeByOrderId, existOrderRef, removeByOrderActorRef) = lazyMap[String, ActorRef] {
     orderId =>
-      context.watch(context.system.actorOf(Props(new OrderActor(orderId, selfSelection, clientBridge))))
+      context.watch(context.system.actorOf(Props(new OrderActor(orderId, selfSelection, marketingSelection, clientBridgeSelection))))
   }
 
   def updateState(event: Evt): Unit = event match {

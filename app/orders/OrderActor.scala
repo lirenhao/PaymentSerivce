@@ -17,15 +17,13 @@ object OrderActor {
 
   case class JoinCmd(id: String) extends Cmd
 
-  case class LeaveCmd(id: String) extends Cmd
-
   case object PayAuthReqCmd extends Cmd
 
   case object GiveUpPayCmd extends Cmd
 
   case object CancelCmd extends Cmd
 
-  case class MarketingCmd(amt: Int, msg: String) extends Cmd
+  case class MarketingCmd(marketingId: String, merTermId: String, userId: String, amt: Int, msg: String) extends Cmd
 
   case class PayResultCmd(state: Boolean, msg: String) extends Cmd
 
@@ -41,9 +39,7 @@ object OrderActor {
 
   case class JoinEvt(id: String) extends Evt
 
-  case class LeaveEvt(id: String) extends Evt
-
-  case class MarketingEvt(amt: Int, msg: String) extends Evt
+  case class MarketingEvt(marketingId: String, merTermId: String, userId: String, amt: Int, msg: String) extends Evt
 
   case class ConfirmEvt(deliveryId: Long) extends Evt
 
@@ -51,17 +47,17 @@ object OrderActor {
 
   case class OrderItem(name: String, price: Int, quantity: Int)
 
-  case class Marketing(amt: Int, msg: String)
+  case class Marketing(marketingId: String, amt: Int, msg: String)
 
   case class OrderMessage(jsValue: JsValue)
 
   trait State
 
-  case class OrderState(items: Option[List[OrderItem]], marketing: Option[Marketing], merTermId: String, userIds: Set[String], state: Option[(Boolean, String)], createTime: Int) extends State
+  case class OrderState(items: List[OrderItem], marketing: Option[Marketing], merTermId: String, userId: Option[String], state: Option[(Boolean, String)], createTime: Int) extends State
 
 }
 
-class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, clientBridge: ActorRef) extends PersistentActor with AtLeastOnceDelivery {
+class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, marketingActorSelection: ActorSelection, clientBridge: ActorSelection) extends PersistentActor with AtLeastOnceDelivery {
 
   import OrderActor._
   import TerminalType._
@@ -71,7 +67,7 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, cl
     private val queue = new LinkedTransferQueue[ActorRef]()
 
     def test(): Unit = if (currentPayActorRef.isEmpty) {
-      currentPayActorRef = Some(queue.poll())
+      currentPayActorRef = Option(queue.poll())
       currentPayActorRef.foreach(_ ! makePayAuthJsValue)
     }
 
@@ -91,9 +87,11 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, cl
 
       test()
     }
+
+    def noPay = queue.isEmpty && currentPayActorRef.isEmpty
   }
 
-  private var state = OrderState(None, None, null, Set.empty, None, 0)
+  private var state = OrderState(List.empty, None, null, Option(null), None, 0)
   private val payQueue = new PayQueue()
 
   override def receiveRecover: Receive = {
@@ -102,19 +100,26 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, cl
 
   def updateState(event: Evt): Unit = event match {
     case InitEvt(items, merTermId, createTime) =>
-      state = state.copy(items = Option(items), merTermId = merTermId, createTime = createTime)
-      deliver(orderManagerActorSelection)(deliveryId => OrderManagerActor.BuildRelationCmd(merTermId, MERCHANT, orderId, deliveryId))
+      deliverBuildRelation(merTermId, MERCHANT)
+      state = state.copy(items = items, merTermId = merTermId, createTime = createTime)
     case JoinEvt(id) =>
-      state = state.copy(userIds = state.userIds + id)
-      deliver(orderManagerActorSelection)(deliveryId => OrderManagerActor.BuildRelationCmd(id, USER, orderId, deliveryId))
-    case LeaveEvt(id) =>
-      state = state.copy(userIds = state.userIds - id)
-      deliver(orderManagerActorSelection)(deliveryId => OrderManagerActor.DeleteRelationCmd(id, USER, orderId, deliveryId))
-    case MarketingEvt(amt, msg) =>
-      state = state.copy(marketing = Option(Marketing(amt, msg)))
+      if (state.userId.isDefined) {
+        deliverDeleteRelation(state.userId.get, USER)
+        deliverMarketingResult(resultState = false, "切换用户")
+      }
+      deliverMarketingQuery(id)
+      deliverBuildRelation(id, USER)
+      state = state.copy(userId = Option(id), marketing = Option(null))
+    case MarketingEvt(marketingId, merTermId, userId, amt, msg) =>
+      if (state.merTermId == merTermId && state.userId.fold(false)(userId == _))
+        state = state.copy(marketing = Option(Marketing(marketingId, amt, msg)))
+      else
+        deliverMarketingResult(marketingId, resultState = false, "失效")
     case PayResultEvt(resultState, msg) =>
-      state = state.copy(state = Some(resultState, msg))
-      deliver(orderManagerActorSelection)(deliveryId => OrderManagerActor.DeleteActiveOrderCmd(orderId, deliveryId))
+      deliverMarketingResult(resultState, msg)
+      deliverDeleteActiveOrder()
+      if (!resultState && state.marketing.isDefined) state = state.copy(marketing = Option(null))
+      state = state.copy(state = Option(resultState, msg))
     case ConfirmEvt(deliveryId) => confirmDelivery(deliveryId)
   }
 
@@ -131,27 +136,28 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, cl
       if (state.items.isEmpty)
         persist(InitEvt(items, merTermId, (System.currentTimeMillis() / 1000).toInt))(updateState)
     case JoinCmd(id) =>
-      if (!state.userIds.contains(id)) {
-        val s = sender()
-        persist(JoinEvt(id)) {
-          event =>
-            updateState(event)
-            List(makeOrderJsValue, makeMarketingJsValue).flatten.foreach(s ! OrderMessage(_))
-        }
+      (state.userId.fold(true)(_ != id), payQueue.noPay) match {
+        case (true, true) =>
+          persist(JoinEvt(id)) {
+            event =>
+              sendMessage(makeFailJsValue("用户 " + id + " 参与支付"), merTermId = null)
+              updateState(event)
+              sender() ! OrderMessage(makeOrderJsValue)
+          }
+        case (true, false) =>
+          sender() ! OrderMessage(makeMessageJsValue(MsgLevel.WARN, "订单正在支付, 当前用户不能参与支付"))
+        case (_, _) =>
       }
-    case LeaveCmd(id) =>
-      if (state.userIds.contains(id))
-        persist(LeaveEvt(id))(updateState)
-    case MarketingCmd(amt, msg) =>
-      if (state.marketing.isEmpty)
-        persist(MarketingEvt(amt, msg)) {
-          event =>
-            updateState(event)
-            clientBridge ! ClientSessionBridgeActor.MessageCmd(
-              Set(state.merTermId), state.userIds, OrderMessage(makeMarketingJsValue.get)
-            )
-        }
-    case GetOrderState => List(makeOrderJsValue, makeMarketingJsValue).flatten.foreach(sender() ! OrderMessage(_))
+    case MarketingCmd(marketingId, merTermId, userId, amt, msg) =>
+      persist(MarketingEvt(marketingId, merTermId, userId, amt, msg)) {
+        event =>
+          updateState(event)
+          if (state.userId.fold(false)(userId == _) && state.merTermId == merTermId)
+            sendMessage(makeMarketingJsValue.get)
+      }
+    case GetOrderState =>
+      sender() ! OrderMessage(makeOrderJsValue)
+      makeMarketingJsValue.foreach(sender() ! OrderMessage(_))
     case PayAuthReqCmd =>
       context.watch(sender())
       payQueue.payReq(sender())
@@ -163,31 +169,83 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, cl
       persist(PayResultEvt(resultState, msg)) {
         event =>
           updateState(event)
-          clientBridge ! ClientSessionBridgeActor.MessageCmd(
-            Set(state.merTermId), state.userIds, OrderMessage(makePayResultJsValue)
-          )
+          sendMessage(makePayResultJsValue)
       }
     case CancelCmd => persist(PayResultEvt(state = false, "取消"))(updateState)
     case Shutdown => context.stop(self)
   }
 
-  def makeOrderJsValue(item: Option[List[OrderItem]]): Option[JsValue] = item.map(list => Json.obj("eventType" -> "ORDER_ITEMS", "orderId" -> orderId, "products" ->
+  private def sendMessage(jsValue: JsValue, merTermId: String = state.merTermId, userId: String = state.userId.orNull): Unit = {
+    if (merTermId != null || userId != null)
+      clientBridge ! ClientSessionBridgeActor.MessageCmd(
+        merTermId, userId, OrderMessage(makePayResultJsValue)
+      )
+  }
+
+  def makeOrderJsValue(item: List[OrderItem]): JsValue = Json.obj("eventType" -> "ORDER_ITEMS", "orderId" -> orderId, "products" ->
     Json.toJson(
-      list.map(i => Json.obj("name" -> i.name, "price" -> i.price, "quantity" -> i.quantity))
+      item.map(i => Json.obj("name" -> i.name, "price" -> i.price, "quantity" -> i.quantity))
     )
-  ))
+  )
 
-  def makeOrderJsValue: Option[JsValue] = makeOrderJsValue(state.items)
+  @inline
+  private def deliverBuildRelation(id: String, terminalType: TerminalType): Unit = {
+    deliver(orderManagerActorSelection)(deliveryId => OrderManagerActor.BuildRelationCmd(id, terminalType, orderId, deliveryId))
+  }
 
-  def makeMarketingJsValue: Option[JsValue] = makeMarketingJsValue(state.marketing)
+  @inline
+  private def deliverDeleteRelation(id: String, terminalType: TerminalType): Unit = {
+    deliver(orderManagerActorSelection)(deliveryId => OrderManagerActor.DeleteRelationCmd(id, terminalType, orderId, deliveryId))
+  }
 
-  def makeMarketingJsValue(marketing: Option[Marketing]): Option[JsValue] = marketing.map(mk => Json.obj("eventType" -> "MARKETING", "orderId" -> orderId, "amt" -> mk.amt, "msg" -> mk.msg))
+  @inline
+  private def deliverDeleteActiveOrder(): Unit = {
+    deliver(orderManagerActorSelection)(deliveryId => OrderManagerActor.DeleteActiveOrderCmd(orderId, deliveryId))
+  }
 
-  def makeMarketingJsValue(amt: Int, msg: String): Option[JsValue] = makeMarketingJsValue(Some(Marketing(amt, msg)))
+  @inline
+  private def deliverMarketingResult(marketingId: String, resultState: Boolean, msg: String): Unit = {
+    deliver(marketingActorSelection)(deliveryId => MarketingActor.MarketingResult(marketingId, resultState, msg, deliveryId))
+  }
 
-  def makePayAuthJsValue = Json.obj("eventType" -> "PAY_AUTH", "orderId" -> orderId)
+  @inline
+  private def deliverMarketingResult(resultState: Boolean, msg: String): Unit = {
+    state.marketing.foreach {
+      mk =>
+        deliverMarketingResult(mk.marketingId, resultState, msg)
+    }
+  }
 
-  def makePayResultJsValue = Json.obj("eventType" -> "PAY_COMPLETED", "orderId" -> orderId, "result" -> state.state.get._1, "msg" -> state.state.get._2)
+  @inline
+  private def deliverMarketingQuery(userId: String): Unit = {
+    deliver(marketingActorSelection)(deliveryId => MarketingActor.MarketingQuery(state.merTermId, userId, state.items, deliveryId))
+  }
+
+  @inline
+  private def makeOrderJsValue: JsValue = makeOrderJsValue(state.items)
+
+  @inline
+  private def makeMarketingJsValue: Option[JsValue] = makeMarketingJsValue(state.marketing)
+
+  @inline
+  private def makeMarketingJsValue(marketing: Option[Marketing]): Option[JsValue] = marketing.map(mk => Json.obj("eventType" -> "MARKETING", "orderId" -> orderId, "amt" -> mk.amt, "msg" -> mk.msg))
+
+  @inline
+  private def makePayAuthJsValue = Json.obj("eventType" -> "PAY_AUTH", "orderId" -> orderId)
+
+  @inline
+  private def makePayResultJsValue = Json.obj("eventType" -> "PAY_COMPLETED", "orderId" -> orderId, "result" -> state.state.get._1, "msg" -> state.state.get._2)
+
+  @inline
+  private def makeFailJsValue(msg: String) = Json.obj("eventType" -> "FAIL", "orderId" -> orderId, "msg" -> msg)
+
+  private object MsgLevel extends Enumeration {
+    type MsgLevel = Value
+    val NONE, WARN, ERR = Value
+  }
+
+  @inline
+  def makeMessageJsValue(level: MsgLevel.MsgLevel, msg: String) = Json.obj("eventType" -> "MESSAGE", "orderId" -> orderId, "level" -> level.toString, "msg" -> msg)
 
   override def persistenceId: String = orderId
 

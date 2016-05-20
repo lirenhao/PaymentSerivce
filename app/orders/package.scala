@@ -16,11 +16,12 @@ package object orders {
 
   val orderActorSystem = ActorSystem("orders")
 
-  // TODO: 还是依赖问题
+  val marketingActorRef = orderActorSystem.actorOf(Props[MarketingActor])
   val clientSessionBridgeActorRef = orderActorSystem.actorOf(Props[ClientSessionBridgeActor])
-  val orderManagerActorRef = orderActorSystem.actorOf(Props(new OrderManagerActor(clientSessionBridgeActorRef)))
+  val orderManagerActorRef = orderActorSystem.actorOf(Props(new OrderManagerActor(
+    orderActorSystem.actorSelection(clientSessionBridgeActorRef.path),
+    orderActorSystem.actorSelection(marketingActorRef.path)
+  )))
 
   orderActorSystem.scheduler.schedule(8 hour, 8 hour, orderManagerActorRef, OrderManagerActor.OrderManagerSnapCmd)
-
-  val marketingActorRef = orderActorSystem.actorOf(Props[MarketingActor])
 }

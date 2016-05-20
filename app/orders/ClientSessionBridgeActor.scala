@@ -16,7 +16,7 @@ object ClientSessionBridgeActor {
 
   case class Register(id: String, terminalType: TerminalType) extends Cmd
 
-  case class MessageCmd(merSet: Set[String], userSet: Set[String], orderMessage: OrderActor.OrderMessage) extends Cmd
+  case class MessageCmd(merId: String, userId: String, orderMessage: OrderActor.OrderMessage) extends Cmd
 
   case class OrderActorRefForwardCmd(orderId: String, cmd: OrderActor.Cmd) extends Cmd
 
@@ -48,7 +48,12 @@ class ClientSessionBridgeActor extends Actor {
 
     def getActorRefs(id: String) = map2.getOrElse(id, mutable.Set.empty[ActorRef])
 
-    def removeBy(actorRef: ActorRef) = map1.remove(actorRef).foreach(map2.remove)
+    def removeBy(actorRef: ActorRef) = map1.remove(actorRef).foreach{
+      id =>
+        val set = map2(id)
+        set -= actorRef
+        if(set.isEmpty) map2.remove(id)
+    }
 
     def removeBy(id: String) = map2.remove(id).foreach(_.foreach(map1.remove))
   }
@@ -65,12 +70,12 @@ class ClientSessionBridgeActor extends Actor {
         case USER => userMap.add(id, s)
       }
       orderManagerActorRef.tell(OrderManagerActor.OrderActorRefsForwardCmd(id, terminalType, OrderActor.GetOrderState), s)
-    case MessageCmd(merSet, userSet, orderMessage) =>
-      def send(set: Set[String], map: ActorRefRelation): Unit = {
-        set.foreach(id => map.getActorRefs(id).foreach(_ ! orderMessage))
+    case MessageCmd(merTermId, userId, orderMessage) =>
+      def send(id: String, map: ActorRefRelation): Unit = {
+        map.getActorRefs(id).foreach(_ ! orderMessage)
       }
-      send(merSet, merTermMap)
-      send(userSet, userMap)
+      send(merTermId, merTermMap)
+      send(userId, userMap)
     case OrderActorRefForwardCmd(orderId, cmd) =>
       orderManagerActorRef.tell(OrderManagerActor.OrderActorRefForwardCmd(orderId, cmd), sender())
     case Terminated(ref) => merTermMap.removeBy(ref); userMap.removeBy(ref)
