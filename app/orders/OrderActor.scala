@@ -68,7 +68,7 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
 
     def test(): Unit = if (currentPayActorRef.isEmpty) {
       currentPayActorRef = Option(queue.poll())
-      currentPayActorRef.foreach(_ ! makePayAuthJsValue)
+      currentPayActorRef.foreach(_ ! OrderMessage(makePayAuthJsValue))
     }
 
     def payReq(actorRef: ActorRef): Unit = {
@@ -248,5 +248,4 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
   def makeMessageJsValue(level: MsgLevel.MsgLevel, msg: String) = Json.obj("eventType" -> "MESSAGE", "orderId" -> orderId, "level" -> level.toString, "msg" -> msg)
 
   override def persistenceId: String = orderId
-
 }

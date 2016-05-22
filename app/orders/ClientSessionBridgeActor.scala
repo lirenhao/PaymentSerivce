@@ -2,7 +2,6 @@ package orders
 
 import akka.actor.{Actor, ActorRef, Terminated}
 import orders.TerminalType._
-import play.api.libs.json.JsValue
 
 import scala.collection.mutable
 

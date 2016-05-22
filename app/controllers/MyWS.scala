@@ -2,6 +2,7 @@ package controllers
 
 import javax.inject.Inject
 
+import akka.actor.Actor.Receive
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.pattern._
 import akka.stream.Materializer
@@ -30,6 +31,7 @@ object EventType extends Enumeration {
   type EventType = Value
   val CLIENT_SIGN_IN, ORDER_ITEMS, MARKETING = Value
 }
+
 class MyWebSocketActor(out: ActorRef) extends Actor {
   var terminalType: TerminalType = null
   var terminalId: String = null
@@ -40,7 +42,7 @@ class MyWebSocketActor(out: ActorRef) extends Actor {
       println(msg)
       (msg \ "eventType").as[String] match {
         case "CLIENT_SIGN_IN" =>
-          TerminalType.values.find( e => e.toString == (msg \ "terminalType").as[String]).foreach{
+          TerminalType.values.find(e => e.toString == (msg \ "terminalType").as[String]).foreach {
             t =>
               terminalId = (msg \ "id").as[String]
               terminalType = t
@@ -49,19 +51,25 @@ class MyWebSocketActor(out: ActorRef) extends Actor {
         case "CREATE_ORDER" =>
           val id = (msg \ "id").as[String]
           val items = (msg \ "products").as[List[JsValue]].map(jv => OrderItem(name = (jv \ "name").as[String], price = (jv \ "price").as[Int], quantity = (jv \ "quantity").as[Int]))
-          (orderManagerActorRef ? OrderManagerActor.CreateOrderCmd).mapTo[String].foreach{
+          (orderManagerActorRef ? OrderManagerActor.CreateOrderCmd).mapTo[String].foreach {
             orderId =>
-              clientSessionBridgeActorRef ! ClientSessionBridgeActor.OrderActorRefForwardCmd(orderId, OrderActor.InitCmd(items, id))
+              sendToOrder(orderId, OrderActor.InitCmd(items, id))
           }
-          println(items)
         case "JOIN_ORDER" =>
-          clientSessionBridgeActorRef ! ClientSessionBridgeActor.OrderActorRefForwardCmd((msg \ "orderId").as[String], OrderActor.JoinCmd((msg \ "id").as[String]))
+          sendToOrder((msg \ "orderId").as[String], OrderActor.JoinCmd((msg \ "id").as[String]))
         case "CANCEL_ORDER" =>
-
+          sendToOrder((msg \ "orderId").as[String], OrderActor.CancelCmd)
+        case "PAY_AUTH_REQ" =>
+          sendToOrder((msg \ "orderId").as[String], OrderActor.PayAuthReqCmd)
         case _ =>
       }
     case OrderActor.OrderMessage(jsValue) =>
       out ! jsValue
+  }
+
+  @inline
+  private def sendToOrder(orderId: String, cmd: OrderActor.Cmd): Unit = {
+    clientSessionBridgeActorRef ! ClientSessionBridgeActor.OrderActorRefForwardCmd(orderId, cmd)
   }
 
   @scala.throws[Exception](classOf[Exception])
@@ -73,8 +81,4 @@ class MyWebSocketActor(out: ActorRef) extends Actor {
 
 object MyWebSocketActor {
   def props(out: ActorRef) = Props(new MyWebSocketActor(out))
-}
-
-class OrderActor extends Actor {
-  override def receive: Receive = ???
 }
