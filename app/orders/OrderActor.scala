@@ -25,7 +25,7 @@ object OrderActor {
 
   case class MarketingCmd(marketingId: String, merTermId: String, userId: String, amt: Int, msg: String) extends Cmd
 
-  case class PayResultCmd(state: Boolean, msg: String) extends Cmd
+  case class PayResultCmd(state: Boolean, channel: String, msg: String) extends Cmd
 
   case class ConfirmCmd(deliveryId: Long) extends Cmd
 
@@ -43,7 +43,7 @@ object OrderActor {
 
   case class ConfirmEvt(deliveryId: Long) extends Evt
 
-  case class PayResultEvt(state: Boolean, msg: String) extends Evt
+  case class PayResultEvt(state: Boolean, channel: String, msg: String) extends Evt
 
   case class OrderItem(name: String, price: Int, quantity: Int)
 
@@ -115,7 +115,7 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
         state = state.copy(marketing = Option(Marketing(marketingId, amt, msg)))
       else
         deliverMarketingResult(marketingId, resultState = false, "失效")
-    case PayResultEvt(resultState, msg) =>
+    case PayResultEvt(resultState, channel, msg) =>
       deliverMarketingResult(resultState, msg)
       deliverDeleteActiveOrder()
       if (!resultState && state.marketing.isDefined) state = state.copy(marketing = Option(null))
@@ -134,7 +134,11 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
   def handleCmd(cmd: Cmd): Unit = cmd match {
     case InitCmd(items, merTermId) =>
       if (state.items.isEmpty)
-        persist(InitEvt(items, merTermId, (System.currentTimeMillis() / 1000).toInt))(updateState)
+        persist(InitEvt(items, merTermId, (System.currentTimeMillis() / 1000).toInt)){
+          event =>
+            updateState(event)
+            sender() ! OrderMessage(makeOrderJsValue)
+        }
     case JoinCmd(id) =>
       (state.userId.fold(true)(_ != id), payQueue.noPay) match {
         case (true, true) =>
@@ -165,13 +169,13 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
       context.unwatch(sender())
       payQueue.givUp(sender())
     case ConfirmCmd(deliveryId) => persist(ConfirmEvt(deliveryId))(updateState)
-    case PayResultCmd(resultState, msg) =>
-      persist(PayResultEvt(resultState, msg)) {
+    case PayResultCmd(resultState, channel, msg) =>
+      persist(PayResultEvt(resultState, channel, msg)) {
         event =>
           updateState(event)
           sendMessage(makePayResultJsValue)
       }
-    case CancelCmd => persist(PayResultEvt(state = false, "取消")){
+    case CancelCmd => persist(PayResultEvt(state = false, "Client", "取消")){
       event =>
         updateState(event)
         sendMessage(makePayResultJsValue)
