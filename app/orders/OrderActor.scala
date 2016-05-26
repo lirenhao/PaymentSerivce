@@ -171,7 +171,11 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
           updateState(event)
           sendMessage(makePayResultJsValue)
       }
-    case CancelCmd => persist(PayResultEvt(state = false, "取消"))(updateState)
+    case CancelCmd => persist(PayResultEvt(state = false, "取消")){
+      event =>
+        updateState(event)
+        sendMessage(makePayResultJsValue)
+    }
     case Shutdown => context.stop(self)
   }
 

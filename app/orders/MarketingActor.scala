@@ -19,8 +19,9 @@ object MarketingActor {
 class MarketingActor extends Actor {
   override def receive: Receive = {
     case MarketingQuery(merTermId, userId, item, deliveryId) =>
+      val totalAmt = item.foldLeft(0)((t, o) => t + o.price * o.quantity)
       sender() ! OrderActor.ConfirmCmd(deliveryId)
-      sender() ! OrderActor.MarketingCmd("001", merTermId, userId, 1000, "测试优惠, 一律十块")
+      sender() ! OrderActor.MarketingCmd("001", merTermId, userId, totalAmt / 2, "测试优惠, 一律5折")
     case MarketingResult(marketingId, resultState, msg, deliveryId) =>
       sender() ! OrderActor.ConfirmCmd(deliveryId)
   }

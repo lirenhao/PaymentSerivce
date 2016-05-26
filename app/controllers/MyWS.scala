@@ -63,6 +63,7 @@ class MyWebSocketActor(out: ActorRef) extends Actor {
         case _ =>
       }
     case OrderActor.OrderMessage(jsValue) =>
+      println("send:" + jsValue)
       out ! jsValue
   }
 

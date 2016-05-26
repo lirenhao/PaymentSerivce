@@ -67,7 +67,10 @@ class OrderManagerActor(clientBridgeSelection: ActorSelection, marketingSelectio
       val seqId = state.seqId + 1
       state = state.copy(seqId = seqId, activeOrders = state.activeOrders + seqId.toString)
     case RemoveOrderEvt(orderId) =>
-      state = state.copy(activeOrders = state.activeOrders - orderId)
+      def removeRelation(map: Map[String, Set[String]]) = {
+        map.map(entry => entry._1 -> (entry._2 - orderId)).filter(entry => entry._2.nonEmpty)
+      }
+      state = state.copy(activeOrders = state.activeOrders - orderId, moRelation = removeRelation(state.moRelation), uoRelation = removeRelation(state.uoRelation))
     case AddRelationEvent(id, terminalType, orderId) =>
       def addRelation(map: Map[String, Set[String]]) = {
         map.updated(id, map.get(id) match {
