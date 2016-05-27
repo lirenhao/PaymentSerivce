@@ -48,7 +48,7 @@ class MyWebSocketActor(out: ActorRef) extends Actor {
           }
         case "CREATE_ORDER" =>
           val id = (msg \ "id").as[String]
-          val items = (msg \ "products").as[List[JsValue]].map(jv => OrderItem(name = (jv \ "name").as[String], price = (jv \ "price").as[Int], quantity = (jv \ "quantity").as[Int]))
+          val items = (msg \ "items").as[List[JsValue]].map(jv => OrderItem(name = (jv \ "name").as[String], price = (jv \ "price").as[Int], quantity = (jv \ "quantity").as[Int]))
           (orderManagerActorRef ? OrderManagerActor.CreateOrderCmd).mapTo[String].foreach{
             orderId =>
               sendToOrder(orderId, OrderActor.InitCmd(items, id))

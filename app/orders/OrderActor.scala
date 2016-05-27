@@ -191,7 +191,7 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
   }
 
   @inline
-  private def makeOrderJsValue(item: List[OrderItem]): JsValue = Json.obj("eventType" -> "ORDER_ITEMS", "orderId" -> orderId, "products" ->
+  private def makeOrderJsValue(item: List[OrderItem]): JsValue = Json.obj("eventType" -> "ORDER_ITEMS", "orderId" -> orderId, "items" ->
     Json.toJson(
       item.map(i => Json.obj("name" -> i.name, "price" -> i.price, "quantity" -> i.quantity))
     )
