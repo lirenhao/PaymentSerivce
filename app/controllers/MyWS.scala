@@ -60,6 +60,10 @@ class MyWebSocketActor(out: ActorRef) extends Actor {
           sendToOrder((msg \ "orderId").as[String], OrderActor.CancelCmd)
         case "PAY_AUTH_REQ" =>
           sendToOrder((msg \ "orderId").as[String], OrderActor.PayAuthReqCmd)
+        case "GIVE_UP_PAY" =>
+          sendToOrder((msg \ "orderId").as[String], OrderActor.GiveUpPayCmd)
+        case "PAY_RESULT" =>
+          sendToOrder((msg \ "orderId").as[String], OrderActor.PayResultCmd((msg \ "state").as[Boolean], (msg \ "channel").as[String], (msg \ "msg").as[String]))
         case _ =>
       }
     case OrderActor.OrderMessage(jsValue) =>
