@@ -30,6 +30,7 @@ object EventType extends Enumeration {
   type EventType = Value
   val CLIENT_SIGN_IN, ORDER_ITEMS, MARKETING = Value
 }
+
 class MyWebSocketActor(out: ActorRef) extends Actor {
   var terminalType: TerminalType = null
   var terminalId: String = null
@@ -40,7 +41,7 @@ class MyWebSocketActor(out: ActorRef) extends Actor {
       println(msg)
       (msg \ "eventType").as[String] match {
         case "CLIENT_SIGN_IN" =>
-          TerminalType.values.find( e => e.toString == (msg \ "terminalType").as[String]).foreach{
+          TerminalType.values.find(e => e.toString == (msg \ "terminalType").as[String]).foreach {
             t =>
               terminalId = (msg \ "id").as[String]
               terminalType = t
@@ -49,7 +50,7 @@ class MyWebSocketActor(out: ActorRef) extends Actor {
         case "CREATE_ORDER" =>
           val id = (msg \ "id").as[String]
           val items = (msg \ "items").as[List[JsValue]].map(jv => OrderItem(name = (jv \ "name").as[String], price = (jv \ "price").as[Int], quantity = (jv \ "quantity").as[Int]))
-          (orderManagerActorRef ? OrderManagerActor.CreateOrderCmd).mapTo[String].foreach{
+          (orderManagerActorRef ? OrderManagerActor.CreateOrderCmd).mapTo[String].foreach {
             orderId =>
               sendToOrder(orderId, OrderActor.InitCmd(items, id))
           }
