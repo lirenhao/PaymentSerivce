@@ -53,7 +53,7 @@ object OrderActor {
 
   trait State
 
-  case class OrderState(items: List[OrderItem], marketing: Option[Marketing], merTermId: String, userId: Option[String], state: Option[(Boolean, String)], createTime: Int) extends State
+  case class OrderState(items: List[OrderItem], marketing: Option[Marketing], merTermId: String, userId: Option[String], state: Option[(Boolean, String, String)], createTime: Int) extends State
 
 }
 
@@ -119,7 +119,7 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
       deliverMarketingResult(resultState, msg)
       deliverDeleteActiveOrder()
       if (!resultState && state.marketing.isDefined) state = state.copy(marketing = Option(null))
-      state = state.copy(state = Option(resultState, msg))
+      state = state.copy(state = Option(resultState, channel, msg))
     case ConfirmEvt(deliveryId) => confirmDelivery(deliveryId)
   }
 
@@ -243,7 +243,7 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
   private def makePayAuthJsValue = Json.obj("eventType" -> "PAY_AUTH", "orderId" -> orderId)
 
   @inline
-  private def makePayResultJsValue = Json.obj("eventType" -> "PAY_COMPLETED", "orderId" -> orderId, "result" -> state.state.get._1, "msg" -> state.state.get._2)
+  private def makePayResultJsValue = Json.obj("eventType" -> "PAY_COMPLETED", "orderId" -> orderId, "result" -> state.state.get._1, "channel" -> state.state.get._2, "msg" -> state.state.get._3)
 
   @inline
   private def makeFailJsValue(msg: String) = Json.obj("eventType" -> "FAIL", "orderId" -> orderId, "msg" -> msg)
