@@ -146,7 +146,7 @@ class OrderActor(orderId: String, orderManagerActorSelection: ActorSelection, ma
             event =>
               sendMessage(makeFailJsValue("用户 " + id + " 参与支付"), merTermId = null)
               updateState(event)
-              sender() ! OrderMessage(makeOrderJsValue)
+              sendMessage(makeOrderJsValue, merTermId = null)
           }
         case (true, false) =>
           sender() ! OrderMessage(makeMessageJsValue(MsgLevel.WARN, "订单正在支付, 当前用户不能参与支付"))
